@@ -15,7 +15,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import time
 from typing import Any, Dict, TYPE_CHECKING
 
 from pyppeteer.browser import Browser
@@ -144,7 +143,7 @@ class Launcher(object):
     def _get_ws_endpoint(self) -> str:
         url = self.url + '/json/version'
         for i in range(100):
-            time.sleep(0.1)
+            await asyncio.sleep(0.1)
             try:
                 with urlopen(url) as f:
                     data = json.loads(f.read().decode())
