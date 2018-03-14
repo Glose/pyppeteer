@@ -4,6 +4,7 @@
 """Chromium process launcher module."""
 
 import asyncio
+import asyncio.subprocess
 import atexit
 import json
 from urllib.request import urlopen
@@ -13,7 +14,6 @@ import os
 import os.path
 from pathlib import Path
 import shutil
-import subprocess
 import tempfile
 from typing import Any, Dict, TYPE_CHECKING
 
@@ -119,10 +119,10 @@ class Launcher(object):
         env = self.options.get('env')
         self.chromeClosed = False
         self.connection: Optional[Connection] = None
-        self.proc = subprocess.Popen(
-            self.cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        self.proc = await asyncio.create_subprocess_exec(
+            *self.cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
             env=env,
         )
 
@@ -155,19 +155,19 @@ class Launcher(object):
             raise BrowserError(f'Failed to connect to browser port: {url}')
         return data['webSocketDebuggerUrl']
 
-    def waitForChromeToClose(self) -> None:
+    async def waitForChromeToClose(self) -> None:
         """Terminate chrome."""
-        if self.proc.poll() is None and not self.chromeClosed:
+        if not self.chromeClosed:
             self.chromeClosed = True
             self.proc.terminate()
-            self.proc.wait()
+            await self.proc.wait()
             self._cleanup_tmp_user_data_dir()
 
     async def killChrome(self) -> None:
         """Terminate chromium process."""
         logger.debug('terminate chrome process...')
         if self._tmp_user_data_dir and os.path.exists(self._tmp_user_data_dir):
-            self.waitForChromeToClose()
+            await self.waitForChromeToClose()
         else:
             if self.connection and self.connection._connected:
                 await self.connection.send('Browser.close')
