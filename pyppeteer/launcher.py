@@ -3,12 +3,11 @@
 
 """Chromium process launcher module."""
 
+import aiohttp
 import asyncio
 import asyncio.subprocess
 import atexit
 import json
-from urllib.request import urlopen
-from urllib.error import URLError
 import logging
 import os
 import os.path
@@ -56,7 +55,7 @@ AUTOMATION_ARGS = [
 
 
 class Launcher(object):
-    """Chrome parocess launcher class."""
+    """Chrome process launcher class."""
 
     def __init__(self, options: Dict[str, Any] = None, **kwargs: Any) -> None:
         """Make new launcher."""
@@ -88,13 +87,6 @@ class Launcher(object):
                 '--hide-scrollbars',
                 '--mute-audio',
             ]
-        if 'executablePath' in self.options:
-            self.exec = self.options['executablePath']
-        else:
-            if not check_chromium():
-                download_chromium()
-            self.exec = str(chromium_excutable())
-        self.cmd = [self.exec] + self.chrome_args
 
     def _parse_args(self) -> None:
         if (not isinstance(self.options.get('args'), list) or
@@ -116,11 +108,19 @@ class Launcher(object):
 
     async def launch(self) -> Browser:
         """Start chrome process and return `Browser` object."""
+
+        if 'executablePath' in self.options:
+            exec_path = self.options['executablePath']
+        else:
+            if not check_chromium():
+                await download_chromium()
+            exec_path = str(chromium_excutable())
+
         env = self.options.get('env')
         self.chromeClosed = False
         self.connection: Optional[Connection] = None
         self.proc = await asyncio.create_subprocess_exec(
-            *self.cmd,
+            exec_path, *self.chrome_args,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
             env=env,
@@ -134,26 +134,26 @@ class Launcher(object):
         atexit.register(_close_process)
 
         connectionDelay = self.options.get('slowMo', 0)
-        self.browserWSEndpoint = self._get_ws_endpoint()
+        self.browserWSEndpoint = await self._get_ws_endpoint()
         logger.info(f'Browser listening on: {self.browserWSEndpoint}')
         self.connection = Connection(self.browserWSEndpoint, connectionDelay)
         return await Browser.create(
             self.connection, self.options, self.killChrome)
 
-    def _get_ws_endpoint(self) -> str:
+    async def _get_ws_endpoint(self) -> str:
         url = self.url + '/json/version'
-        for i in range(100):
-            await asyncio.sleep(0.1)
-            try:
-                with urlopen(url) as f:
-                    data = json.loads(f.read().decode())
-                break
-            except URLError as e:
-                continue
-        else:
-            # cannot connet to browser for 10 seconds
-            raise BrowserError(f'Failed to connect to browser port: {url}')
-        return data['webSocketDebuggerUrl']
+        async with aiohttp.ClientSession() as session:
+            for i in range(100):
+                await asyncio.sleep(0.1)
+                try:
+                    async with session.get(url) as response:
+                        data = await response.json()
+                except aiohttp.ClientConnectorError:
+                    pass
+                else:
+                    return data['webSocketDebuggerUrl']
+        # cannot connet to browser for 10 seconds
+        raise BrowserError(f'Failed to connect to browser port: {url}')
 
     async def waitForChromeToClose(self) -> None:
         """Terminate chrome."""

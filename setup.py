@@ -42,6 +42,7 @@ except ImportError:
     readme = src
 
 requirements = [
+    'aiohttp',
     'pyee',
     'websockets',
 ]

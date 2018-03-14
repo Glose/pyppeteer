@@ -3,6 +3,7 @@
 
 """Chromium dowload module."""
 
+import aiohttp
 from io import BytesIO
 import logging
 import os
@@ -37,7 +38,7 @@ chromiumExecutable = {
 }
 
 
-def curret_platform() -> str:
+def current_platform() -> str:
     """Get current platform name by short string."""
     if sys.platform.startswith('linux'):
         return 'linux'
@@ -52,24 +53,26 @@ def curret_platform() -> str:
 
 def get_url() -> str:
     """Get chromium download url."""
-    return downloadURLs[curret_platform()]
+    return downloadURLs[current_platform()]
 
 
-def download_zip(url: str) -> bytes:
+async def download_zip(url: str) -> bytes:
     """Download data from url."""
-    logger.warning('start chromium download.\n'
+    logger.warning('starting chromium download.\n'
                    'Download may take a few minutes.')
-    with request.urlopen(url) as f:
-        data = f.read()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.read()
     logger.warning('chromium download done.')
     return data
 
 
-def extract_zip(data: bytes, path: Path) -> None:
+async def extract_zip(data: bytes, path: Path) -> None:
     """Extract zipped data to path."""
+    exec_path = chromium_excutable()
     # On mac zipfile module cannot extract correctly, so use unzip instead.
-    if curret_platform() == 'mac':
-        import subprocess
+    if current_platform() == 'mac':
+        import asyncio
         import shutil
         zip_path = path / 'chrome.zip'
         if not path.exists():
@@ -79,13 +82,12 @@ def extract_zip(data: bytes, path: Path) -> None:
         if not shutil.which('unzip'):
             raise OSError('Failed to automatically extract chrome.zip.'
                           f'Please unzip {zip_path} manually.')
-        subprocess.run(['unzip', str(zip_path)], cwd=str(path))
-        if chromium_excutable().exists() and zip_path.exists():
+        await asyncio.create_subprocess_exec('unzip', str(zip_path), cwd=str(path))
+        if exec_path.exists() and zip_path.exists():
             zip_path.unlink()
     else:
         with ZipFile(BytesIO(data)) as zf:
             zf.extractall(str(path))
-    exec_path = chromium_excutable()
     if not exec_path.exists():
         raise IOError('Failed to extract chromium.')
     exec_path.chmod(exec_path.stat().st_mode | stat.S_IXOTH | stat.S_IXGRP |
@@ -93,14 +95,15 @@ def extract_zip(data: bytes, path: Path) -> None:
     logger.warning(f'chromium extracted to: {path}')
 
 
-def download_chromium() -> None:
+async def download_chromium() -> None:
     """Downlaod and extract chrmoium."""
-    extract_zip(download_zip(get_url()), DOWNLOADS_FOLDER / REVISION)
+    data = await download_zip(get_url())
+    await extract_zip(data, DOWNLOADS_FOLDER / REVISION)
 
 
 def chromium_excutable() -> Path:
     """Get path of the chromium executable."""
-    return chromiumExecutable[curret_platform()]
+    return chromiumExecutable[current_platform()]
 
 
 def check_chromium() -> bool:
